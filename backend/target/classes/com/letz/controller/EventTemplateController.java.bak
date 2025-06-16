@@ -1,0 +1,110 @@
+package com.letz.controller;
+
+import com.letz.dto.template.EventTemplateRequest;
+import com.letz.dto.template.EventTemplateResponse;
+import com.letz.entity.EventTemplate;
+import com.letz.service.EventTemplateService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/event-templates")
+@RequiredArgsConstructor
+@CrossOrigin
+public class EventTemplateController {
+
+    private final EventTemplateService eventTemplateService;
+
+    @GetMapping("/public")
+    public ResponseEntity<Page<EventTemplateResponse>> getPublicTemplates(Pageable pageable) {
+        Page<EventTemplateResponse> templates = eventTemplateService.getPublicTemplates(pageable);
+        return ResponseEntity.ok(templates);
+    }
+
+    @GetMapping("/my")
+    public ResponseEntity<Page<EventTemplateResponse>> getMyTemplates(
+            Authentication authentication,
+            Pageable pageable) {
+        Long userId = Long.parseLong(authentication.getName());
+        Page<EventTemplateResponse> templates = eventTemplateService.getTemplatesByUser(userId, pageable);
+        return ResponseEntity.ok(templates);
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<EventTemplateResponse> getTemplate(@PathVariable Long id) {
+        EventTemplateResponse template = eventTemplateService.getTemplateById(id);
+        return ResponseEntity.ok(template);
+    }
+
+    @PostMapping
+    public ResponseEntity<EventTemplateResponse> createTemplate(
+            @RequestBody EventTemplateRequest request,
+            Authentication authentication) {
+        Long userId = Long.parseLong(authentication.getName());
+        EventTemplateResponse template = eventTemplateService.createTemplate(request, userId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(template);
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<EventTemplateResponse> updateTemplate(
+            @PathVariable Long id,
+            @RequestBody EventTemplateRequest request,
+            Authentication authentication) {
+        Long userId = Long.parseLong(authentication.getName());
+        EventTemplateResponse template = eventTemplateService.updateTemplate(id, request, userId);
+        return ResponseEntity.ok(template);
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteTemplate(
+            @PathVariable Long id,
+            Authentication authentication) {
+        Long userId = Long.parseLong(authentication.getName());
+        eventTemplateService.deleteTemplate(id, userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/categories")
+    public ResponseEntity<List<EventTemplate.TemplateCategory>> getCategories() {
+        List<EventTemplate.TemplateCategory> categories = eventTemplateService.getAvailableCategories();
+        return ResponseEntity.ok(categories);
+    }
+
+    @GetMapping("/popular")
+    public ResponseEntity<List<EventTemplateResponse>> getPopularTemplates() {
+        List<EventTemplateResponse> templates = eventTemplateService.getPopularTemplates();
+        return ResponseEntity.ok(templates);
+    }
+
+    @GetMapping("/trending")
+    public ResponseEntity<List<EventTemplateResponse>> getTrendingTemplates() {
+        List<EventTemplateResponse> templates = eventTemplateService.getTrendingTemplates();
+        return ResponseEntity.ok(templates);
+    }
+
+    @PostMapping("/{id}/rate")
+    public ResponseEntity<Void> rateTemplate(
+            @PathVariable Long id,
+            @RequestParam Double rating,
+            Authentication authentication) {
+        Long userId = Long.parseLong(authentication.getName());
+        eventTemplateService.rateTemplate(id, rating, userId);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/{id}/use")
+    public ResponseEntity<Void> useTemplate(
+            @PathVariable Long id,
+            Authentication authentication) {
+        Long userId = Long.parseLong(authentication.getName());
+        eventTemplateService.incrementUsageCount(id, userId);
+        return ResponseEntity.ok().build();
+    }
+} 

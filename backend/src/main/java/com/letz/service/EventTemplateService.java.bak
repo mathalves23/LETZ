@@ -1,0 +1,162 @@
+package com.letz.service;
+
+import com.letz.dto.template.EventTemplateRequest;
+import com.letz.dto.template.EventTemplateResponse;
+import com.letz.entity.EventTemplate;
+import com.letz.entity.User;
+import com.letz.repository.EventTemplateRepository;
+import com.letz.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+@Transactional
+public class EventTemplateService {
+
+    private final EventTemplateRepository eventTemplateRepository;
+    private final UserRepository userRepository;
+
+    public Page<EventTemplateResponse> getPublicTemplates(Pageable pageable) {
+        Page<EventTemplate> templates = eventTemplateRepository.findByIsPublicTrue(pageable);
+        return templates.map(this::convertToResponse);
+    }
+
+    public Page<EventTemplateResponse> getTemplatesByUser(Long userId, Pageable pageable) {
+        Page<EventTemplate> templates = eventTemplateRepository.findByCreatedById(userId, pageable);
+        return templates.map(this::convertToResponse);
+    }
+
+    public EventTemplateResponse getTemplateById(Long id) {
+        EventTemplate template = eventTemplateRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Template não encontrado"));
+        return convertToResponse(template);
+    }
+
+    public EventTemplateResponse createTemplate(EventTemplateRequest request, Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado"));
+
+        EventTemplate template = new EventTemplate();
+        template.setName(request.getName());
+        template.setDescription(request.getDescription());
+        template.setType(request.getType());
+        template.setCategory(request.getCategory());
+        template.setLocation(request.getLocation());
+        template.setDuration(request.getDuration());
+        template.setMaxParticipants(request.getMaxParticipants());
+        template.setDefaultItems(request.getDefaultItems());
+        template.setTags(request.getTags());
+        template.setIsPublic(request.getIsPublic());
+        template.setCreatedBy(user);
+        template.setCreatedAt(LocalDateTime.now());
+        template.setRating(0.0);
+        template.setRatingCount(0);
+        template.setUsageCount(0);
+
+        EventTemplate savedTemplate = eventTemplateRepository.save(template);
+        return convertToResponse(savedTemplate);
+    }
+
+    public EventTemplateResponse updateTemplate(Long id, EventTemplateRequest request, Long userId) {
+        EventTemplate template = eventTemplateRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Template não encontrado"));
+
+        if (!template.getCreatedBy().getId().equals(userId)) {
+            throw new RuntimeException("Não autorizado a editar este template");
+        }
+
+        template.setName(request.getName());
+        template.setDescription(request.getDescription());
+        template.setType(request.getType());
+        template.setCategory(request.getCategory());
+        template.setLocation(request.getLocation());
+        template.setDuration(request.getDuration());
+        template.setMaxParticipants(request.getMaxParticipants());
+        template.setDefaultItems(request.getDefaultItems());
+        template.setTags(request.getTags());
+        template.setIsPublic(request.getIsPublic());
+        template.setUpdatedAt(LocalDateTime.now());
+
+        EventTemplate savedTemplate = eventTemplateRepository.save(template);
+        return convertToResponse(savedTemplate);
+    }
+
+    public void deleteTemplate(Long id, Long userId) {
+        EventTemplate template = eventTemplateRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Template não encontrado"));
+
+        if (!template.getCreatedBy().getId().equals(userId)) {
+            throw new RuntimeException("Não autorizado a deletar este template");
+        }
+
+        eventTemplateRepository.delete(template);
+    }
+
+    public List<EventTemplate.TemplateCategory> getAvailableCategories() {
+        return eventTemplateRepository.findAvailableCategories();
+    }
+
+    public List<EventTemplateResponse> getPopularTemplates() {
+        List<EventTemplate> templates = eventTemplateRepository.findPopularTemplates(PageRequest.of(0, 10));
+        return templates.stream().map(this::convertToResponse).collect(Collectors.toList());
+    }
+
+    public List<EventTemplateResponse> getTrendingTemplates() {
+        List<EventTemplate> templates = eventTemplateRepository.findTrendingTemplates(PageRequest.of(0, 10));
+        return templates.stream().map(this::convertToResponse).collect(Collectors.toList());
+    }
+
+    public void rateTemplate(Long templateId, Double rating, Long userId) {
+        EventTemplate template = eventTemplateRepository.findById(templateId)
+                .orElseThrow(() -> new RuntimeException("Template não encontrado"));
+
+        // Calcular nova média de rating
+        double currentRating = template.getRating();
+        int currentCount = template.getRatingCount();
+        
+        double newRating = ((currentRating * currentCount) + rating) / (currentCount + 1);
+        
+        template.setRating(newRating);
+        template.setRatingCount(currentCount + 1);
+        
+        eventTemplateRepository.save(template);
+    }
+
+    public void incrementUsageCount(Long templateId, Long userId) {
+        EventTemplate template = eventTemplateRepository.findById(templateId)
+                .orElseThrow(() -> new RuntimeException("Template não encontrado"));
+
+        template.setUsageCount(template.getUsageCount() + 1);
+        eventTemplateRepository.save(template);
+    }
+
+    private EventTemplateResponse convertToResponse(EventTemplate template) {
+        EventTemplateResponse response = new EventTemplateResponse();
+        response.setId(template.getId());
+        response.setName(template.getName());
+        response.setDescription(template.getDescription());
+        response.setType(template.getType());
+        response.setCategory(template.getCategory());
+        response.setLocation(template.getLocation());
+        response.setDuration(template.getDuration());
+        response.setMaxParticipants(template.getMaxParticipants());
+        response.setDefaultItems(template.getDefaultItems());
+        response.setTags(template.getTags());
+        response.setIsPublic(template.getIsPublic());
+        response.setCreatedBy(template.getCreatedBy().getName());
+        response.setCreatedAt(template.getCreatedAt());
+        response.setRating(template.getRating());
+        response.setRatingCount(template.getRatingCount());
+        response.setUsageCount(template.getUsageCount());
+        return response;
+    }
+} 

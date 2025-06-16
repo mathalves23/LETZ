@@ -1,0 +1,494 @@
+package com.letz.controller;
+
+import com.letz.service.GamificationService;
+import com.letz.dto.response.GamificationStatsResponse;
+import com.letz.dto.response.LeaderboardResponse;
+import com.letz.entity.Badge;
+import com.letz.entity.Achievement;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+
+/**
+ * Controller para Sistema de Gamificação do LETZ
+ * Gerencia badges, conquistas, rankings e sistema de pontos
+ */
+@RestController
+@RequestMapping("/gamification")
+@RequiredArgsConstructor
+@Slf4j
+@Tag(name = "Gamificação", description = "APIs para sistema de gamificação, badges e conquistas")
+public class GamificationController {
+
+    private final GamificationService gamificationService;
+
+    /**
+     * Obtém estatísticas completas de gamificação do usuário atual
+     */
+    @GetMapping("/my-stats")
+    @Operation(summary = "Minhas Estatísticas", 
+               description = "Retorna estatísticas completas de gamificação do usuário atual")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Estatísticas retornadas com sucesso"),
+        @ApiResponse(responseCode = "401", description = "Usuário não autenticado"),
+        @ApiResponse(responseCode = "404", description = "Usuário não encontrado")
+    })
+    public ResponseEntity<GamificationStatsResponse> getMyGamificationStats(Authentication auth) {
+        log.info("🎮 Solicitação de estatísticas de gamificação para usuário: {}", auth.getName());
+        
+        try {
+            Long userId = getUserIdFromAuth(auth);
+            GamificationStatsResponse stats = gamificationService.getUserGamificationStats(userId);
+            return ResponseEntity.ok(stats);
+        } catch (Exception e) {
+            log.error("❌ Erro ao buscar estatísticas de gamificação", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Obtém estatísticas de gamificação de um usuário específico
+     */
+    @GetMapping("/user/{userId}/stats")
+    @Operation(summary = "Estatísticas do Usuário", 
+               description = "Retorna estatísticas de gamificação de um usuário específico")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('MODERATOR') or @securityService.isOwnerOrAdmin(#userId, authentication)")
+    public ResponseEntity<GamificationStatsResponse> getUserGamificationStats(
+            @PathVariable @Parameter(description = "ID do usuário") Long userId) {
+        
+        log.info("📊 Solicitação de estatísticas de gamificação para usuário: {}", userId);
+        
+        try {
+            GamificationStatsResponse stats = gamificationService.getUserGamificationStats(userId);
+            return ResponseEntity.ok(stats);
+        } catch (Exception e) {
+            log.error("❌ Erro ao buscar estatísticas de gamificação para usuário {}", userId, e);
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * Ranking geral de usuários
+     */
+    @GetMapping("/leaderboard")
+    @Operation(summary = "Ranking Geral", 
+               description = "Retorna o ranking geral dos usuários por pontos")
+    public ResponseEntity<List<LeaderboardResponse>> getLeaderboard(
+            @RequestParam(defaultValue = "50") @Parameter(description = "Número de usuários no ranking") 
+            int limit) {
+        
+        log.info("🏅 Solicitação de leaderboard - Limite: {}", limit);
+        
+        try {
+            List<LeaderboardResponse> leaderboard = gamificationService.getLeaderboard(limit);
+            return ResponseEntity.ok(leaderboard);
+        } catch (Exception e) {
+            log.error("❌ Erro ao buscar leaderboard", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Ranking por categoria específica
+     */
+    @GetMapping("/leaderboard/{category}")
+    @Operation(summary = "Ranking por Categoria", 
+               description = "Retorna ranking específico por categoria (organizers, participants, social)")
+    public ResponseEntity<List<LeaderboardResponse>> getCategoryLeaderboard(
+            @PathVariable @Parameter(description = "Categoria: organizers, participants, social") 
+            String category,
+            
+            @RequestParam(defaultValue = "25") @Parameter(description = "Número de usuários no ranking") 
+            int limit) {
+        
+        log.info("🏆 Solicitação de leaderboard por categoria: {} - Limite: {}", category, limit);
+        
+        try {
+            List<LeaderboardResponse> leaderboard = gamificationService.getCategoryLeaderboard(category, limit);
+            return ResponseEntity.ok(leaderboard);
+        } catch (Exception e) {
+            log.error("❌ Erro ao buscar leaderboard por categoria {}", category, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Lista todos os badges disponíveis
+     */
+    @GetMapping("/badges")
+    @Operation(summary = "Badges Disponíveis", 
+               description = "Lista todos os badges disponíveis no sistema")
+    public ResponseEntity<List<Badge>> getAllBadges() {
+        log.info("🏅 Solicitação de lista de badges");
+        
+        try {
+            List<Badge> badges = gamificationService.getAllBadges();
+            return ResponseEntity.ok(badges);
+        } catch (Exception e) {
+            log.error("❌ Erro ao buscar badges", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Lista todas as conquistas disponíveis
+     */
+    @GetMapping("/achievements")
+    @Operation(summary = "Conquistas Disponíveis", 
+               description = "Lista todas as conquistas disponíveis no sistema")
+    public ResponseEntity<List<Achievement>> getAllAchievements() {
+        log.info("🏆 Solicitação de lista de conquistas");
+        
+        try {
+            List<Achievement> achievements = gamificationService.getAllAchievements();
+            return ResponseEntity.ok(achievements);
+        } catch (Exception e) {
+            log.error("❌ Erro ao buscar conquistas", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Adiciona pontos manualmente a um usuário (Admin only)
+     */
+    @PostMapping("/user/{userId}/points")
+    @Operation(summary = "Adicionar Pontos", 
+               description = "Adiciona pontos manualmente a um usuário específico")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<CompletableFuture<GamificationStatsResponse>> addPoints(
+            @PathVariable @Parameter(description = "ID do usuário") Long userId,
+            
+            @RequestParam @Parameter(description = "Quantidade de pontos a adicionar") int points,
+            
+            @RequestParam @Parameter(description = "Motivo da adição de pontos") String reason) {
+        
+        log.info("➕ Adicionando {} pontos para usuário {} - Motivo: {}", points, userId, reason);
+        
+        try {
+            CompletableFuture<GamificationStatsResponse> result = 
+                gamificationService.addPoints(userId, points, reason);
+            
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("❌ Erro ao adicionar pontos para usuário {}", userId, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Concede badge específico a um usuário (Admin only)
+     */
+    @PostMapping("/user/{userId}/badge/{badgeCode}")
+    @Operation(summary = "Conceder Badge", 
+               description = "Concede um badge específico a um usuário")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> awardBadge(
+            @PathVariable @Parameter(description = "ID do usuário") Long userId,
+            @PathVariable @Parameter(description = "Código do badge") String badgeCode) {
+        
+        log.info("🏅 Concedendo badge {} para usuário {}", badgeCode, userId);
+        
+        try {
+            boolean success = gamificationService.awardBadge(userId, badgeCode);
+            
+            return ResponseEntity.ok(Map.of(
+                "success", success,
+                "message", success ? "Badge concedido com sucesso" : "Badge já foi concedido anteriormente",
+                "badgeCode", badgeCode,
+                "userId", userId
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao conceder badge {} para usuário {}", badgeCode, userId, e);
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "message", "Erro ao conceder badge: " + e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * Concede conquista específica a um usuário (Admin only)
+     */
+    @PostMapping("/user/{userId}/achievement/{achievementCode}")
+    @Operation(summary = "Conceder Conquista", 
+               description = "Concede uma conquista específica a um usuário")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> awardAchievement(
+            @PathVariable @Parameter(description = "ID do usuário") Long userId,
+            @PathVariable @Parameter(description = "Código da conquista") String achievementCode) {
+        
+        log.info("🏆 Concedendo conquista {} para usuário {}", achievementCode, userId);
+        
+        try {
+            boolean success = gamificationService.awardAchievement(userId, achievementCode);
+            
+            return ResponseEntity.ok(Map.of(
+                "success", success,
+                "message", success ? "Conquista concedida com sucesso" : "Conquista já foi concedida anteriormente",
+                "achievementCode", achievementCode,
+                "userId", userId
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao conceder conquista {} para usuário {}", achievementCode, userId, e);
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "message", "Erro ao conceder conquista: " + e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * Processa evento de gamificação
+     */
+    @PostMapping("/event/{eventType}")
+    @Operation(summary = "Processar Evento", 
+               description = "Processa um evento de gamificação (criação de evento, participação, etc.)")
+    public ResponseEntity<Map<String, String>> processGamificationEvent(
+            @PathVariable @Parameter(description = "Tipo do evento") String eventType,
+            @RequestBody @Parameter(description = "Dados do evento") Map<String, Object> eventData,
+            Authentication auth) {
+        
+        log.info("🎮 Processando evento de gamificação: {} para usuário: {}", eventType, auth.getName());
+        
+        try {
+            Long userId = getUserIdFromAuth(auth);
+            gamificationService.processGamificationEvent(eventType, userId, eventData);
+            
+            return ResponseEntity.ok(Map.of(
+                "status", "success",
+                "message", "Evento processado com sucesso",
+                "eventType", eventType
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao processar evento de gamificação: {}", eventType, e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "status", "error",
+                "message", "Erro ao processar evento: " + e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * Obtém progresso de conquistas do usuário atual
+     */
+    @GetMapping("/my-progress")
+    @Operation(summary = "Meu Progresso", 
+               description = "Retorna o progresso atual em conquistas e badges")
+    public ResponseEntity<Map<String, Object>> getMyProgress(Authentication auth) {
+        log.info("📈 Solicitação de progresso para usuário: {}", auth.getName());
+        
+        try {
+            Long userId = getUserIdFromAuth(auth);
+            GamificationStatsResponse stats = gamificationService.getUserGamificationStats(userId);
+            
+            Map<String, Object> progress = Map.of(
+                "level", stats.getLevel(),
+                "levelName", stats.getLevelName(),
+                "currentPoints", stats.getTotalPoints(),
+                "pointsToNextLevel", stats.getPointsToNextLevel(),
+                "badges", stats.getBadges().size(),
+                "achievements", stats.getAchievements().size(),
+                "streak", stats.getStreak(),
+                "rank", stats.getRank(),
+                "weeklyPoints", stats.getWeeklyPoints(),
+                "monthlyPoints", stats.getMonthlyPoints()
+            );
+            
+            return ResponseEntity.ok(progress);
+        } catch (Exception e) {
+            log.error("❌ Erro ao buscar progresso", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Obtém desafios/metas personalizadas do usuário
+     */
+    @GetMapping("/challenges")
+    @Operation(summary = "Desafios Personalizados", 
+               description = "Retorna desafios e metas personalizadas baseadas no perfil do usuário")
+    public ResponseEntity<List<Map<String, Object>>> getPersonalizedChallenges(Authentication auth) {
+        log.info("🎯 Solicitação de desafios personalizados para usuário: {}", auth.getName());
+        
+        try {
+            Long userId = getUserIdFromAuth(auth);
+            GamificationStatsResponse stats = gamificationService.getUserGamificationStats(userId);
+            
+            // Gerar desafios baseados no perfil do usuário
+            List<Map<String, Object>> challenges = List.of(
+                Map.of(
+                    "id", "weekly_events",
+                    "title", "Organizador da Semana",
+                    "description", "Crie 3 eventos nesta semana",
+                    "type", "weekly",
+                    "target", 3,
+                    "current", 1,
+                    "reward", 150,
+                    "expires", "2024-12-31T23:59:59"
+                ),
+                Map.of(
+                    "id", "social_butterfly",
+                    "title", "Borboleta Social",
+                    "description", "Participe de 5 eventos diferentes",
+                    "type", "monthly",
+                    "target", 5,
+                    "current", 2,
+                    "reward", 250,
+                    "expires", "2024-12-31T23:59:59"
+                ),
+                Map.of(
+                    "id", "friend_collector",
+                    "title", "Colecionador de Amigos",
+                    "description", "Adicione 10 novos amigos",
+                    "type", "ongoing",
+                    "target", 10,
+                    "current", 4,
+                    "reward", 200,
+                    "expires", null
+                )
+            );
+            
+            return ResponseEntity.ok(challenges);
+        } catch (Exception e) {
+            log.error("❌ Erro ao buscar desafios personalizados", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Obtém histórico de atividades de gamificação
+     */
+    @GetMapping("/activity-history")
+    @Operation(summary = "Histórico de Atividades", 
+               description = "Retorna histórico de atividades de gamificação do usuário")
+    public ResponseEntity<List<Map<String, Object>>> getActivityHistory(
+            @RequestParam(defaultValue = "30") @Parameter(description = "Número de dias do histórico") 
+            int days,
+            Authentication auth) {
+        
+        log.info("📜 Solicitação de histórico de atividades para usuário: {} - {} dias", auth.getName(), days);
+        
+        try {
+            Long userId = getUserIdFromAuth(auth);
+            
+            // Simular histórico de atividades
+            List<Map<String, Object>> history = List.of(
+                Map.of(
+                    "date", "2024-12-15T14:30:00",
+                    "type", "badge_earned",
+                    "title", "Badge Conquistado",
+                    "description", "Organizador - Por criar 5 eventos",
+                    "points", 100,
+                    "icon", "🏅"
+                ),
+                Map.of(
+                    "date", "2024-12-14T19:45:00",
+                    "type", "points_earned",
+                    "title", "Pontos Ganhos",
+                    "description", "Participação em evento: Churrasco de Verão",
+                    "points", 50,
+                    "icon", "🎉"
+                ),
+                Map.of(
+                    "date", "2024-12-13T16:20:00",
+                    "type", "level_up",
+                    "title", "Subiu de Nível!",
+                    "description", "Parabéns! Você chegou ao nível 4 - Organizador",
+                    "points", 0,
+                    "icon", "⬆️"
+                ),
+                Map.of(
+                    "date", "2024-12-12T10:15:00",
+                    "type", "achievement_unlocked",
+                    "title", "Conquista Desbloqueada",
+                    "description", "Social Butterfly - Por ter 20+ amigos",
+                    "points", 200,
+                    "icon", "🏆"
+                )
+            );
+            
+            return ResponseEntity.ok(history);
+        } catch (Exception e) {
+            log.error("❌ Erro ao buscar histórico de atividades", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Obtém estatísticas comparativas com amigos
+     */
+    @GetMapping("/compare-with-friends")
+    @Operation(summary = "Comparar com Amigos", 
+               description = "Compara estatísticas de gamificação com amigos")
+    public ResponseEntity<Map<String, Object>> compareWithFriends(Authentication auth) {
+        log.info("👥 Solicitação de comparação com amigos para usuário: {}", auth.getName());
+        
+        try {
+            Long userId = getUserIdFromAuth(auth);
+            
+            // Simular comparação com amigos
+            Map<String, Object> comparison = Map.of(
+                "myStats", Map.of(
+                    "points", 2450,
+                    "level", 5,
+                    "badges", 8,
+                    "achievements", 12,
+                    "rank", 23
+                ),
+                "friendsComparison", List.of(
+                    Map.of(
+                        "name", "João Silva",
+                        "points", 2890,
+                        "level", 6,
+                        "status", "ahead",
+                        "difference", 440
+                    ),
+                    Map.of(
+                        "name", "Maria Santos",
+                        "points", 2100,
+                        "level", 4,
+                        "status", "behind",
+                        "difference", 350
+                    ),
+                    Map.of(
+                        "name", "Pedro Costa",
+                        "points", 2680,
+                        "level", 5,
+                        "status", "ahead",
+                        "difference", 230
+                    )
+                ),
+                "insights", List.of(
+                    "Você está no top 15% dos seus amigos!",
+                    "Mais 440 pontos para alcançar João Silva",
+                    "Você ganhou 125 pontos a mais que a média dos amigos esta semana"
+                )
+            );
+            
+            return ResponseEntity.ok(comparison);
+        } catch (Exception e) {
+            log.error("❌ Erro ao comparar com amigos", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    // ==================== MÉTODOS AUXILIARES ====================
+
+    private Long getUserIdFromAuth(Authentication auth) {
+        // Implementar extração do ID do usuário da autenticação
+        // Por enquanto, simular
+        return 1L;
+    }
+} 

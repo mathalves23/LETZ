@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # Banco de dados PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: letz-postgres
+    environment:
+      POSTGRES_DB: letz_db
+      POSTGRES_USER: letz_user
+      POSTGRES_PASSWORD: letz_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - letz-network
+
+  # Redis para cache (opcional)
+  redis:
+    image: redis:7-alpine
+    container_name: letz-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - letz-network
+
+  # pgAdmin para administração do banco
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: letz-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@letz.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - letz-network
+
+volumes:
+  postgres_data:
+
+networks:
+  letz-network:
+    driver: bridge 

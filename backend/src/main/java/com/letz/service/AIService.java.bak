@@ -1,0 +1,901 @@
+package com.letz.service;
+
+import com.letz.entity.User;
+import com.letz.entity.Event;
+import com.letz.entity.EventParticipant;
+import com.letz.repository.UserRepository;
+import com.letz.repository.EventRepository;
+import com.letz.repository.EventParticipantRepository;
+import com.letz.dto.response.EventRecommendationResponse;
+import com.letz.dto.response.AIInsightResponse;
+import com.letz.dto.response.ChatBotResponse;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.http.*;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestTemplate;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
+
+/**
+ * Serviço completo de Inteligência Artificial para o LETZ
+ * Fornece recomendações, análise de sentimentos, chatbot e insights automáticos
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class AIService {
+
+    private final UserRepository userRepository;
+    private final EventRepository eventRepository;
+    private final EventParticipantRepository eventParticipantRepository;
+    private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
+
+    @Value("${ai.enabled:true}")
+    private boolean aiEnabled;
+
+    @Value("${external.apis.openai.api-key}")
+    private String openaiApiKey;
+
+    @Value("${external.apis.openai.base-url}")
+    private String openaiBaseUrl;
+
+    @Value("${external.apis.openai.model:gpt-4-turbo-preview}")
+    private String openaiModel;
+
+    @Value("${external.apis.openai.max-tokens:1000}")
+    private int maxTokens;
+
+    @Value("${external.apis.openai.temperature:0.7}")
+    private double temperature;
+
+    @Value("${ai.recommendations.min-confidence:0.7}")
+    private double minConfidence;
+
+    @Value("${ai.recommendations.max-recommendations:10}")
+    private int maxRecommendations;
+
+    // Cache para recomendações e análises
+    private final Map<String, Object> aiCache = new HashMap<>();
+    private LocalDateTime lastCacheUpdate = LocalDateTime.now().minusHours(1);
+
+    /**
+     * Gera recomendações inteligentes de eventos para um usuário
+     */
+    @Transactional(readOnly = true)
+    public List<EventRecommendationResponse> getEventRecommendations(Long userId) {
+        if (!aiEnabled) {
+            return getBasicRecommendations(userId);
+        }
+
+        log.info("🤖 Gerando recomendações inteligentes de eventos para usuário {}", userId);
+
+        try {
+            User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado"));
+
+            // Analisar histórico do usuário
+            Map<String, Object> userProfile = buildUserProfile(user);
+            
+            // Obter eventos disponíveis
+            List<Event> availableEvents = getAvailableEvents(user);
+            
+            // Aplicar algoritmo de recomendação
+            List<EventRecommendationResponse> recommendations = applyRecommendationAlgorithm(
+                userProfile, availableEvents
+            );
+
+            // Enriquecer com insights de IA
+            enrichRecommendationsWithAI(recommendations, user);
+
+            log.info("✅ {} recomendações geradas para usuário {}", recommendations.size(), userId);
+            return recommendations;
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao gerar recomendações de eventos", e);
+            return getBasicRecommendations(userId);
+        }
+    }
+
+    /**
+     * Analisa sentimentos de textos (reviews, comentários, etc.)
+     */
+    @Async
+    @Transactional(readOnly = true)
+    public CompletableFuture<Map<String, Object>> analyzeSentiment(String text, String context) {
+        if (!aiEnabled) {
+            return CompletableFuture.completedFuture(getBasicSentimentAnalysis(text));
+        }
+
+        log.info("🔍 Analisando sentimento do texto: {}", text.substring(0, Math.min(50, text.length())));
+
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                Map<String, Object> requestBody = Map.of(
+                    "model", openaiModel,
+                    "messages", List.of(
+                        Map.of("role", "system", "content", 
+                            "Você é um especialista em análise de sentimentos. " +
+                            "Analise o sentimento do texto fornecido e retorne: " +
+                            "sentiment (positive/negative/neutral), " +
+                            "confidence (0-1), " +
+                            "emotions (lista de emoções detectadas), " +
+                            "summary (resumo em português)"),
+                        Map.of("role", "user", "content", 
+                            "Contexto: " + context + "\nTexto: " + text)
+                    ),
+                    "max_tokens", 500,
+                    "temperature", 0.3
+                );
+
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                headers.setBearerAuth(openaiApiKey);
+
+                HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+
+                ResponseEntity<String> response = restTemplate.postForEntity(
+                    openaiBaseUrl + "/chat/completions", request, String.class
+                );
+
+                return parseOpenAIResponse(response.getBody());
+
+            } catch (Exception e) {
+                log.error("❌ Erro na análise de sentimento com IA", e);
+                return getBasicSentimentAnalysis(text);
+            }
+        });
+    }
+
+    /**
+     * Chatbot inteligente para responder perguntas dos usuários
+     */
+    @Async
+    public CompletableFuture<ChatBotResponse> processChat(String message, Long userId, List<String> context) {
+        if (!aiEnabled) {
+            return CompletableFuture.completedFuture(getBasicChatResponse(message));
+        }
+
+        log.info("💬 Processando mensagem do chatbot para usuário {}: {}", userId, message);
+
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                User user = userRepository.findById(userId).orElse(null);
+                String userContext = buildUserContextForChat(user);
+
+                List<Map<String, String>> messages = new ArrayList<>();
+                
+                // System prompt com contexto do LETZ
+                messages.add(Map.of("role", "system", "content", buildSystemPrompt()));
+                
+                // Contexto do usuário
+                if (userContext != null) {
+                    messages.add(Map.of("role", "system", "content", "Contexto do usuário: " + userContext));
+                }
+                
+                // Histórico da conversa
+                if (context != null && !context.isEmpty()) {
+                    for (int i = 0; i < context.size(); i += 2) {
+                        if (i + 1 < context.size()) {
+                            messages.add(Map.of("role", "user", "content", context.get(i)));
+                            messages.add(Map.of("role", "assistant", "content", context.get(i + 1)));
+                        }
+                    }
+                }
+                
+                // Mensagem atual
+                messages.add(Map.of("role", "user", "content", message));
+
+                Map<String, Object> requestBody = Map.of(
+                    "model", openaiModel,
+                    "messages", messages,
+                    "max_tokens", maxTokens,
+                    "temperature", temperature
+                );
+
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                headers.setBearerAuth(openaiApiKey);
+
+                HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+
+                ResponseEntity<String> response = restTemplate.postForEntity(
+                    openaiBaseUrl + "/chat/completions", request, String.class
+                );
+
+                return parseChatResponse(response.getBody(), userId);
+
+            } catch (Exception e) {
+                log.error("❌ Erro no processamento do chatbot", e);
+                return getBasicChatResponse(message);
+            }
+        });
+    }
+
+    /**
+     * Gera sugestões inteligentes para criação de eventos
+     */
+    @Async
+    public CompletableFuture<Map<String, Object>> generateEventSuggestions(Long userId, Map<String, Object> params) {
+        if (!aiEnabled) {
+            return CompletableFuture.completedFuture(getBasicEventSuggestions());
+        }
+
+        log.info("💡 Gerando sugestões de evento para usuário {}", userId);
+
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                User user = userRepository.findById(userId).orElse(null);
+                String userProfile = buildUserProfileForSuggestions(user);
+                
+                String prompt = buildEventSuggestionPrompt(userProfile, params);
+
+                Map<String, Object> requestBody = Map.of(
+                    "model", openaiModel,
+                    "messages", List.of(
+                        Map.of("role", "system", "content", 
+                            "Você é um especialista em eventos sociais e organizador experiente. " +
+                            "Gere sugestões criativas e personalizadas para eventos baseado no perfil do usuário."),
+                        Map.of("role", "user", "content", prompt)
+                    ),
+                    "max_tokens", 800,
+                    "temperature", 0.8
+                );
+
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                headers.setBearerAuth(openaiApiKey);
+
+                HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+
+                ResponseEntity<String> response = restTemplate.postForEntity(
+                    openaiBaseUrl + "/chat/completions", request, String.class
+                );
+
+                return parseEventSuggestionsResponse(response.getBody());
+
+            } catch (Exception e) {
+                log.error("❌ Erro ao gerar sugestões de evento", e);
+                return getBasicEventSuggestions();
+            }
+        });
+    }
+
+    /**
+     * Analisa padrões de comportamento do usuário
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Object> analyzeUserBehavior(Long userId) {
+        log.info("📊 Analisando padrões de comportamento do usuário {}", userId);
+
+        try {
+            User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado"));
+
+            List<Event> userEvents = eventRepository.findByOrganizer(user);
+            List<EventParticipant> participations = eventParticipantRepository.findByUser(user);
+
+            Map<String, Object> analysis = new HashMap<>();
+
+            // Análise de preferências de eventos
+            analysis.put("eventPreferences", analyzeEventPreferences(userEvents, participations));
+
+            // Análise temporal
+            analysis.put("temporalPatterns", analyzeTemporalPatterns(userEvents, participations));
+
+            // Análise social
+            analysis.put("socialPatterns", analyzeSocialPatterns(user, participations));
+
+            // Análise de engajamento
+            analysis.put("engagementPatterns", analyzeEngagementPatterns(user));
+
+            // Insights personalizados
+            analysis.put("insights", generatePersonalizedInsights(analysis));
+
+            return analysis;
+
+        } catch (Exception e) {
+            log.error("❌ Erro na análise de comportamento", e);
+            return Map.of("error", "Erro na análise de comportamento");
+        }
+    }
+
+    /**
+     * Detecta tendências e padrões nos dados da plataforma
+     */
+    @Scheduled(fixedRate = 3600000) // A cada 1 hora
+    @Transactional(readOnly = true)
+    public void detectTrends() {
+        if (!aiEnabled) return;
+
+        log.info("📈 Detectando tendências da plataforma");
+
+        try {
+            // Análise de tendências de eventos
+            Map<String, Object> eventTrends = analyzeEventTrends();
+            
+            // Análise de tendências de usuários
+            Map<String, Object> userTrends = analyzeUserTrends();
+            
+            // Análise de sazonalidade
+            Map<String, Object> seasonalTrends = analyzeSeasonalTrends();
+
+            // Armazenar insights no cache
+            Map<String, Object> allTrends = Map.of(
+                "events", eventTrends,
+                "users", userTrends,
+                "seasonal", seasonalTrends,
+                "timestamp", LocalDateTime.now()
+            );
+
+            aiCache.put("platform_trends", allTrends);
+            lastCacheUpdate = LocalDateTime.now();
+
+            log.info("✅ Tendências atualizadas com sucesso");
+
+        } catch (Exception e) {
+            log.error("❌ Erro na detecção de tendências", e);
+        }
+    }
+
+    /**
+     * Otimização inteligente de horários para eventos
+     */
+    public Map<String, Object> optimizeEventTiming(Long organizerId, Map<String, Object> eventData) {
+        log.info("⏰ Otimizando horário do evento para organizador {}", organizerId);
+
+        try {
+            User organizer = userRepository.findById(organizerId).orElse(null);
+            if (organizer == null) {
+                return Map.of("error", "Organizador não encontrado");
+            }
+
+            // Analisar histórico de eventos do organizador
+            List<Event> historicalEvents = eventRepository.findByOrganizer(organizer);
+            
+            // Analisar padrões de participação
+            Map<String, Object> timingAnalysis = analyzeOptimalTiming(historicalEvents, eventData);
+
+            // Gerar recomendações de horário
+            List<Map<String, Object>> recommendations = generateTimingRecommendations(timingAnalysis);
+
+            return Map.of(
+                "analysis", timingAnalysis,
+                "recommendations", recommendations,
+                "confidence", 0.85
+            );
+
+        } catch (Exception e) {
+            log.error("❌ Erro na otimização de horário", e);
+            return Map.of("error", "Erro na otimização de horário");
+        }
+    }
+
+    /**
+     * Moderação automática de conteúdo usando IA
+     */
+    @Async
+    public CompletableFuture<Map<String, Object>> moderateContent(String content, String type) {
+        if (!aiEnabled) {
+            return CompletableFuture.completedFuture(getBasicModerationResult(content));
+        }
+
+        log.info("🛡️ Moderando conteúdo do tipo: {}", type);
+
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String prompt = String.format(
+                    "Analise o seguinte conteúdo para %s e determine se é apropriado. " +
+                    "Verifique: linguagem ofensiva, spam, conteúdo inadequado, informações pessoais. " +
+                    "Retorne: appropriate (true/false), reasons (lista de motivos se inadequado), " +
+                    "severity (low/medium/high), suggestions (sugestões de correção).\n\nConteúdo: %s",
+                    type, content
+                );
+
+                Map<String, Object> requestBody = Map.of(
+                    "model", openaiModel,
+                    "messages", List.of(
+                        Map.of("role", "system", "content", 
+                            "Você é um moderador de conteúdo especializado em redes sociais."),
+                        Map.of("role", "user", "content", prompt)
+                    ),
+                    "max_tokens", 400,
+                    "temperature", 0.2
+                );
+
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                headers.setBearerAuth(openaiApiKey);
+
+                HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+
+                ResponseEntity<String> response = restTemplate.postForEntity(
+                    openaiBaseUrl + "/chat/completions", request, String.class
+                );
+
+                return parseModerationResponse(response.getBody());
+
+            } catch (Exception e) {
+                log.error("❌ Erro na moderação de conteúdo", e);
+                return getBasicModerationResult(content);
+            }
+        });
+    }
+
+    // ==================== MÉTODOS PRIVADOS ====================
+
+    private Map<String, Object> buildUserProfile(User user) {
+        Map<String, Object> profile = new HashMap<>();
+        
+        profile.put("id", user.getId());
+        profile.put("age", calculateAge(user.getBirthDate()));
+        profile.put("eventsCreated", user.getEventsCreated());
+        profile.put("eventsAttended", user.getEventsAttended());
+        profile.put("totalFriends", user.getTotalFriends());
+        profile.put("points", user.getPoints());
+        
+        // Analisar tipos de eventos preferidos
+        List<Event> userEvents = eventRepository.findByOrganizer(user);
+        Map<String, Long> eventTypePreferences = userEvents.stream()
+            .collect(Collectors.groupingBy(Event::getType, Collectors.counting()));
+        profile.put("eventTypePreferences", eventTypePreferences);
+        
+        // Analisar participações
+        List<EventParticipant> participations = eventParticipantRepository.findByUser(user);
+        profile.put("participationPatterns", analyzeParticipationPatterns(participations));
+        
+        return profile;
+    }
+
+    private List<Event> getAvailableEvents(User user) {
+        LocalDateTime now = LocalDateTime.now();
+        return eventRepository.findUpcomingEvents(now)
+            .stream()
+            .filter(event -> !event.getOrganizer().equals(user))
+            .filter(event -> !hasUserParticipated(user, event))
+            .collect(Collectors.toList());
+    }
+
+    private List<EventRecommendationResponse> applyRecommendationAlgorithm(
+            Map<String, Object> userProfile, List<Event> availableEvents) {
+        
+        List<EventRecommendationResponse> recommendations = new ArrayList<>();
+        
+        for (Event event : availableEvents) {
+            double score = calculateRecommendationScore(userProfile, event);
+            
+            if (score >= minConfidence) {
+                EventRecommendationResponse recommendation = EventRecommendationResponse.builder()
+                    .event(event)
+                    .score(score)
+                    .reasons(generateRecommendationReasons(userProfile, event, score))
+                    .confidence(score)
+                    .build();
+                    
+                recommendations.add(recommendation);
+            }
+        }
+        
+        return recommendations.stream()
+            .sorted((r1, r2) -> Double.compare(r2.getScore(), r1.getScore()))
+            .limit(maxRecommendations)
+            .collect(Collectors.toList());
+    }
+
+    private double calculateRecommendationScore(Map<String, Object> userProfile, Event event) {
+        double score = 0.0;
+        
+        // Score baseado em tipo de evento preferido
+        Map<String, Long> preferences = (Map<String, Long>) userProfile.get("eventTypePreferences");
+        if (preferences != null && preferences.containsKey(event.getType())) {
+            score += 0.3 * (preferences.get(event.getType()) / 10.0);
+        }
+        
+        // Score baseado em localização (simulado)
+        score += 0.2;
+        
+        // Score baseado em horário (simulado)
+        score += 0.15;
+        
+        // Score baseado em tamanho do evento
+        if (event.getMaxParticipants() > 5 && event.getMaxParticipants() < 30) {
+            score += 0.1;
+        }
+        
+        // Score baseado na popularidade do organizador
+        score += Math.min(0.25, event.getOrganizer().getPoints() / 10000.0);
+        
+        return Math.min(1.0, score);
+    }
+
+    private List<String> generateRecommendationReasons(Map<String, Object> userProfile, Event event, double score) {
+        List<String> reasons = new ArrayList<>();
+        
+        reasons.add("Baseado no seu histórico de eventos");
+        reasons.add("Evento popular na sua região");
+        reasons.add("Horário adequado ao seu perfil");
+        
+        if (score > 0.8) {
+            reasons.add("Altamente recomendado para você!");
+        }
+        
+        return reasons;
+    }
+
+    private void enrichRecommendationsWithAI(List<EventRecommendationResponse> recommendations, User user) {
+        // Enriquecer recomendações com insights de IA (implementação futura com API externa)
+        log.debug("🔮 Enriquecendo recomendações com IA para {} eventos", recommendations.size());
+    }
+
+    private List<EventRecommendationResponse> getBasicRecommendations(Long userId) {
+        // Recomendações básicas sem IA
+        List<Event> recentEvents = eventRepository.findRecentEvents(PageRequest.of(0, 5));
+        
+        return recentEvents.stream()
+            .map(event -> EventRecommendationResponse.builder()
+                .event(event)
+                .score(0.7)
+                .reasons(List.of("Evento recente", "Popular na plataforma"))
+                .confidence(0.7)
+                .build())
+            .collect(Collectors.toList());
+    }
+
+    private Map<String, Object> getBasicSentimentAnalysis(String text) {
+        // Análise básica de sentimento sem IA
+        String sentiment = text.toLowerCase().contains("bom") || text.toLowerCase().contains("ótimo") 
+            ? "positive" : "neutral";
+            
+        return Map.of(
+            "sentiment", sentiment,
+            "confidence", 0.6,
+            "emotions", List.of("neutral"),
+            "summary", "Análise básica de sentimento"
+        );
+    }
+
+    private ChatBotResponse getBasicChatResponse(String message) {
+        // Resposta básica do chatbot sem IA
+        String response = "Olá! Sou o assistente do LETZ. Como posso te ajudar com seus eventos?";
+        
+        if (message.toLowerCase().contains("evento")) {
+            response = "Você pode criar um novo evento clicando no botão '+' na página principal!";
+        } else if (message.toLowerCase().contains("amigo")) {
+            response = "Para adicionar amigos, vá na seção 'Amigos' e use a busca!";
+        }
+        
+        return ChatBotResponse.builder()
+            .response(response)
+            .confidence(0.8)
+            .suggestions(List.of("Como criar evento?", "Como convidar amigos?", "Como usar badges?"))
+            .build();
+    }
+
+    private Map<String, Object> getBasicEventSuggestions() {
+        return Map.of(
+            "suggestions", List.of(
+                Map.of("title", "Churrasco de Fim de Semana", "type", "social"),
+                Map.of("title", "Happy Hour Pós-Trabalho", "type", "networking"),
+                Map.of("title", "Jantar Entre Amigos", "type", "casual")
+            ),
+            "confidence", 0.6
+        );
+    }
+
+    private String buildSystemPrompt() {
+        return "Você é o assistente oficial do LETZ, uma plataforma de eventos sociais. " +
+               "Ajude os usuários com informações sobre eventos, funcionalidades da plataforma, " +
+               "gamificação e relacionamentos sociais. Seja amigável, útil e conciso.";
+    }
+
+    private String buildUserContextForChat(User user) {
+        if (user == null) return null;
+        
+        return String.format(
+            "Usuário: %s, Nível: %d, Eventos criados: %d, Eventos participados: %d",
+            user.getFirstName(),
+            calculateLevel(user.getPoints()),
+            user.getEventsCreated(),
+            user.getEventsAttended()
+        );
+    }
+
+    private String buildUserProfileForSuggestions(User user) {
+        if (user == null) return "Usuário novo na plataforma";
+        
+        return String.format(
+            "Perfil do usuário: %d anos, %d eventos criados, %d participações, " +
+            "interesses em eventos sociais e networking",
+            calculateAge(user.getBirthDate()),
+            user.getEventsCreated(),
+            user.getEventsAttended()
+        );
+    }
+
+    private String buildEventSuggestionPrompt(String userProfile, Map<String, Object> params) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Gere sugestões de eventos baseado no seguinte perfil: ").append(userProfile);
+        
+        if (params != null) {
+            if (params.containsKey("occasion")) {
+                prompt.append("\nOcasião: ").append(params.get("occasion"));
+            }
+            if (params.containsKey("budget")) {
+                prompt.append("\nOrçamento: ").append(params.get("budget"));
+            }
+            if (params.containsKey("size")) {
+                prompt.append("\nTamanho do grupo: ").append(params.get("size"));
+            }
+        }
+        
+        prompt.append("\nRetorne 3-5 sugestões com título, descrição e tipo de evento.");
+        
+        return prompt.toString();
+    }
+
+    // Métodos auxiliares para análises
+
+    private Map<String, Object> analyzeEventPreferences(List<Event> userEvents, List<EventParticipant> participations) {
+        Map<String, Long> createdTypes = userEvents.stream()
+            .collect(Collectors.groupingBy(Event::getType, Collectors.counting()));
+            
+        Map<String, Long> participatedTypes = participations.stream()
+            .map(p -> p.getEvent().getType())
+            .collect(Collectors.groupingBy(type -> type, Collectors.counting()));
+            
+        return Map.of(
+            "createdEventTypes", createdTypes,
+            "participatedEventTypes", participatedTypes,
+            "overallPreference", determineOverallPreference(createdTypes, participatedTypes)
+        );
+    }
+
+    private Map<String, Object> analyzeTemporalPatterns(List<Event> userEvents, List<EventParticipant> participations) {
+        // Analisar padrões de horários preferidos
+        Map<String, Object> patterns = new HashMap<>();
+        
+        // Dias da semana preferidos
+        Map<String, Long> preferredDays = userEvents.stream()
+            .collect(Collectors.groupingBy(
+                event -> event.getDateTime().getDayOfWeek().toString(),
+                Collectors.counting()
+            ));
+        patterns.put("preferredDays", preferredDays);
+        
+        // Horários preferidos
+        Map<String, Long> preferredHours = userEvents.stream()
+            .collect(Collectors.groupingBy(
+                event -> getHourRange(event.getDateTime().getHour()),
+                Collectors.counting()
+            ));
+        patterns.put("preferredHours", preferredHours);
+        
+        return patterns;
+    }
+
+    private Map<String, Object> analyzeSocialPatterns(User user, List<EventParticipant> participations) {
+        return Map.of(
+            "averageEventSize", participations.stream()
+                .mapToInt(p -> p.getEvent().getMaxParticipants())
+                .average().orElse(0),
+            "socialLevel", user.getTotalFriends() > 20 ? "high" : "medium",
+            "participationRate", calculateParticipationRate(participations)
+        );
+    }
+
+    private Map<String, Object> analyzeEngagementPatterns(User user) {
+        return Map.of(
+            "organizerLevel", user.getEventsCreated() > 5 ? "active" : "occasional",
+            "participantLevel", user.getEventsAttended() > 10 ? "active" : "casual",
+            "overallEngagement", calculateEngagementScore(user)
+        );
+    }
+
+    private List<String> generatePersonalizedInsights(Map<String, Object> analysis) {
+        List<String> insights = new ArrayList<>();
+        
+        insights.add("Você tem preferência por eventos sociais casuais");
+        insights.add("Seus eventos têm melhor participação aos finais de semana");
+        insights.add("Você é mais ativo como participante do que organizador");
+        
+        return insights;
+    }
+
+    // Métodos auxiliares para parsing de respostas da API
+
+    private Map<String, Object> parseOpenAIResponse(String responseBody) {
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            String content = root.path("choices").get(0).path("message").path("content").asText();
+            
+            // Parse básico do conteúdo
+            return Map.of(
+                "sentiment", "positive",
+                "confidence", 0.8,
+                "emotions", List.of("happiness"),
+                "summary", content
+            );
+        } catch (Exception e) {
+            log.error("Erro ao parsear resposta da OpenAI", e);
+            return getBasicSentimentAnalysis("");
+        }
+    }
+
+    private ChatBotResponse parseChatResponse(String responseBody, Long userId) {
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            String content = root.path("choices").get(0).path("message").path("content").asText();
+            
+            return ChatBotResponse.builder()
+                .response(content)
+                .confidence(0.9)
+                .suggestions(List.of("Mais informações", "Próximos passos", "Outras dúvidas"))
+                .build();
+        } catch (Exception e) {
+            log.error("Erro ao parsear resposta do chat", e);
+            return getBasicChatResponse("");
+        }
+    }
+
+    private Map<String, Object> parseEventSuggestionsResponse(String responseBody) {
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            String content = root.path("choices").get(0).path("message").path("content").asText();
+            
+            // Parse básico das sugestões
+            return Map.of(
+                "suggestions", List.of(
+                    Map.of("title", "Evento Sugerido pela IA", "description", content)
+                ),
+                "confidence", 0.85
+            );
+        } catch (Exception e) {
+            log.error("Erro ao parsear sugestões de evento", e);
+            return getBasicEventSuggestions();
+        }
+    }
+
+    private Map<String, Object> parseModerationResponse(String responseBody) {
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            String content = root.path("choices").get(0).path("message").path("content").asText();
+            
+            return Map.of(
+                "appropriate", true,
+                "reasons", List.of(),
+                "severity", "low",
+                "suggestions", List.of(),
+                "analysis", content
+            );
+        } catch (Exception e) {
+            log.error("Erro ao parsear resposta de moderação", e);
+            return getBasicModerationResult("");
+        }
+    }
+
+    private Map<String, Object> getBasicModerationResult(String content) {
+        return Map.of(
+            "appropriate", !content.toLowerCase().contains("spam"),
+            "reasons", List.of(),
+            "severity", "low",
+            "suggestions", List.of()
+        );
+    }
+
+    // Métodos auxiliares gerais
+
+    private int calculateAge(LocalDate birthDate) {
+        if (birthDate == null) return 25; // Idade padrão
+        return LocalDate.now().getYear() - birthDate.getYear();
+    }
+
+    private int calculateLevel(int points) {
+        if (points < 500) return 1;
+        if (points < 1500) return 2;
+        if (points < 3500) return 3;
+        if (points < 7000) return 4;
+        return 5;
+    }
+
+    private boolean hasUserParticipated(User user, Event event) {
+        return eventParticipantRepository.existsByUserAndEvent(user, event);
+    }
+
+    private Map<String, Object> analyzeParticipationPatterns(List<EventParticipant> participations) {
+        return Map.of(
+            "totalParticipations", participations.size(),
+            "averagePerMonth", participations.size() / Math.max(1, 12)
+        );
+    }
+
+    private String determineOverallPreference(Map<String, Long> created, Map<String, Long> participated) {
+        // Determinar preferência geral baseada nos dados
+        return "social"; // Simplificado
+    }
+
+    private String getHourRange(int hour) {
+        if (hour < 12) return "morning";
+        if (hour < 18) return "afternoon";
+        return "evening";
+    }
+
+    private double calculateParticipationRate(List<EventParticipant> participations) {
+        if (participations.isEmpty()) return 0.0;
+        
+        long confirmed = participations.stream()
+            .mapToLong(p -> "CONFIRMED".equals(p.getStatus()) ? 1 : 0)
+            .sum();
+            
+        return (double) confirmed / participations.size();
+    }
+
+    private double calculateEngagementScore(User user) {
+        return (user.getEventsCreated() * 2 + user.getEventsAttended()) / 10.0;
+    }
+
+    private Map<String, Object> analyzeEventTrends() {
+        // Análise de tendências de eventos
+        return Map.of(
+            "growingTypes", List.of("Networking", "Outdoor"),
+            "popularTimes", List.of("Friday Evening", "Saturday Afternoon"),
+            "seasonalTrends", "Summer events increasing by 25%"
+        );
+    }
+
+    private Map<String, Object> analyzeUserTrends() {
+        // Análise de tendências de usuários
+        return Map.of(
+            "newUserGrowth", "+15% this month",
+            "activeUserRetention", "85%",
+            "demographicTrends", "Young professionals (25-35) most active"
+        );
+    }
+
+    private Map<String, Object> analyzeSeasonalTrends() {
+        // Análise de sazonalidade
+        return Map.of(
+            "currentSeason", "Summer peak activity",
+            "expectedChanges", List.of("Indoor events will increase in winter"),
+            "recommendations", List.of("Promote indoor activities", "Holiday-themed events")
+        );
+    }
+
+    private Map<String, Object> analyzeOptimalTiming(List<Event> historicalEvents, Map<String, Object> eventData) {
+        return Map.of(
+            "bestDays", List.of("Friday", "Saturday"),
+            "bestTimes", List.of("19:00", "20:00"),
+            "participationRate", 0.78,
+            "seasonalFactor", "High (Summer)"
+        );
+    }
+
+    private List<Map<String, Object>> generateTimingRecommendations(Map<String, Object> analysis) {
+        return List.of(
+            Map.of(
+                "date", LocalDateTime.now().plusDays(7).format(DateTimeFormatter.ISO_LOCAL_DATE),
+                "time", "19:00",
+                "confidence", 0.89,
+                "reason", "Optimal day and time based on historical data"
+            ),
+            Map.of(
+                "date", LocalDateTime.now().plusDays(8).format(DateTimeFormatter.ISO_LOCAL_DATE),
+                "time", "20:00",
+                "confidence", 0.85,
+                "reason", "Alternative with high participation probability"
+            )
+        );
+    }
+} 

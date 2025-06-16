@@ -1,0 +1,321 @@
+server:
+  port: 5005
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: LETZ Backend
+  
+  # H2 Database Configuration (default for development)
+  datasource:
+    url: jdbc:h2:mem:letzdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driverClassName: org.h2.Driver
+    username: sa
+    password: ''
+  
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+      settings:
+        web-allow-others: true
+  
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        use_sql_comments: true
+  
+  # Security
+  security:
+    user:
+      name: admin
+      password: admin123
+
+# JWT Configuration
+jwt:
+  secret: "TUdJU1RRSDlyeVhGZHh4aGlOblJMZTBVQTdoeThLSTdXMEh3b1I2QlJ5VWdRV2ZyTndUVkpxNHZCWGhNUE5SZw=="
+  expiration: 604800000 # 7 dias em millisegundos
+  refresh-expiration: 2592000000 # 30 dias em millisegundos
+
+# Logging
+logging:
+  level:
+    com.letz: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+    org.springframework.security: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+
+---
+# PostgreSQL Profile (use with --spring.profiles.active=postgres)
+spring:
+  config:
+    activate:
+      on-profile: postgres
+  
+  datasource:
+    url: jdbc:postgresql://localhost:5432/letz_db
+    username: letz_user
+    password: letz_password
+    driver-class-name: org.postgresql.Driver
+  
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+# CORS Configuration
+cors:
+  allowed-origins: ${CORS_ORIGINS:http://localhost:3005,http://127.0.0.1:3005,http://localhost:3000,http://127.0.0.1:3000}
+  allowed-methods: GET,POST,PUT,DELETE,OPTIONS
+  allowed-headers: "*"
+  allow-credentials: true
+
+# File Upload Configuration
+file:
+  upload:
+    directory: ${FILE_UPLOAD_DIR:./uploads}
+    max-size: 10MB
+
+# Google Maps API
+google:
+  maps:
+    api-key: ${GOOGLE_MAPS_API_KEY:AIzaSyBvOkBwGyOhCx6_Qi4Kv8C5uGC6T7QY4mE}
+    base-url: https://maps.googleapis.com/maps/api
+    geocoding-url: /geocode/json
+    places-url: /place/nearbysearch/json
+    directions-url: /directions/json
+    max-results: 20
+    timeout: 5000
+
+# Swagger/OpenAPI Configuration
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+
+# External APIs Configuration
+external:
+  apis:
+    # Google APIs
+    google:
+      analytics:
+        tracking-id: ${GOOGLE_ANALYTICS_ID:GA4-G-XXXXXXXXXX}
+        measurement-id: ${GOOGLE_MEASUREMENT_ID:G-XXXXXXXXXX}
+        api-secret: ${GOOGLE_ANALYTICS_SECRET:}
+    
+    # OpenWeather API
+    openweather:
+      key: ${OPENWEATHER_API_KEY:f8c0e1234567890abcdef1234567890a}
+      base-url: https://api.openweathermap.org/data/2.5
+      current-url: /weather
+      forecast-url: /forecast
+      geocoding-url: http://api.openweathermap.org/geo/1.0
+      timeout: 5000
+      cache-duration: 300 # 5 minutos em segundos
+      units: metric
+      language: pt_br
+    
+    # VAPID Keys para Push Notifications
+    vapid:
+      public-key: ${VAPID_PUBLIC_KEY:BGY8Q9z4mQdAOTCQfpAKBgKmOz1hfVP8Q7y5rJl2Ek9xWjZ8m3nVb7K4dF6sG8vY}
+      private-key: ${VAPID_PRIVATE_KEY:vN8_QzGh5Jl3KmP9rS2tU6wX0yZ4aB7cD1eF8gH2iJ}
+      subject: mailto:admin@letz.com
+      
+    # OpenAI API para features de AI
+    openai:
+      api-key: ${OPENAI_API_KEY:sk-proj-1234567890abcdef1234567890abcdef}
+      base-url: https://api.openai.com/v1
+      model: gpt-4-turbo-preview
+      max-tokens: 1000
+      temperature: 0.7
+      timeout: 30000
+      
+    # Azure Cognitive Services (alternativa)
+    azure:
+      cognitive:
+        key: ${AZURE_COGNITIVE_KEY:}
+        endpoint: ${AZURE_COGNITIVE_ENDPOINT:}
+        region: ${AZURE_REGION:eastus}
+        
+    # Sentiment Analysis
+    sentiment:
+      provider: openai # ou azure
+      cache-duration: 3600 # 1 hora
+      
+    # Location Services
+    location:
+      provider: google # ou nominatim
+      cache-duration: 86400 # 24 horas
+      
+# Analytics Configuration
+analytics:
+  enabled: true
+  retention-days: 365
+  batch-size: 100
+  flush-interval: 30000 # 30 segundos
+  
+  metrics:
+    events:
+      track-views: true
+      track-interactions: true
+      track-conversions: true
+    users:
+      track-sessions: true
+      track-engagement: true
+      track-retention: true
+    performance:
+      track-load-times: true
+      track-errors: true
+      track-api-calls: true
+
+# Gamification Configuration
+gamification:
+  enabled: true
+  
+  points:
+    event-creation: 100
+    event-participation: 50
+    friend-invitation: 25
+    profile-completion: 75
+    first-event: 200
+    weekly-active: 30
+    monthly-active: 150
+    
+  levels:
+    experience-multiplier: 1.5
+    level-1: 0
+    level-2: 500
+    level-3: 1500
+    level-4: 3500
+    level-5: 7000
+    level-6: 12000
+    level-7: 20000
+    level-8: 32000
+    level-9: 50000
+    level-10: 75000
+    
+  badges:
+    auto-award: true
+    categories:
+      - SOCIAL
+      - ORGANIZER
+      - PARTICIPANT
+      - LOYALTY
+      - SPECIAL
+      
+  achievements:
+    reset-monthly: false
+    track-streaks: true
+    notification-enabled: true
+
+# AI Configuration
+ai:
+  enabled: true
+  
+  recommendations:
+    engine: collaborative-filtering # content-based, collaborative-filtering, hybrid
+    min-confidence: 0.7
+    max-recommendations: 10
+    update-frequency: 3600 # 1 hora
+    
+  content-analysis:
+    sentiment-analysis: true
+    content-moderation: true
+    spam-detection: true
+    language-detection: true
+    
+  chatbot:
+    enabled: true
+    model: gpt-4-turbo-preview
+    personality: friendly
+    max-context: 10
+    fallback-responses: true
+    
+  smart-suggestions:
+    event-titles: true
+    event-descriptions: true
+    optimal-timing: true
+    venue-recommendations: true
+    
+# Security Configuration
+security:
+  rate-limiting:
+    enabled: true
+    requests-per-minute: 100
+    burst-capacity: 200
+    
+  encryption:
+    algorithm: AES-256-GCM
+    key-rotation-days: 90
+    
+  monitoring:
+    suspicious-activity: true
+    failed-login-threshold: 5
+    account-lockout-duration: 900 # 15 minutos
+
+# Feature Flags
+features:
+  analytics-dashboard: true
+  ai-recommendations: true
+  advanced-gamification: true
+  real-time-notifications: true
+  social-features: true
+  premium-features: false
+  beta-features: false
+
+# Redis Configuration (para cache e sessões)
+redis:
+  enabled: ${REDIS_ENABLED:false}
+  host: ${REDIS_HOST:localhost}
+  port: ${REDIS_PORT:6379}
+  password: ${REDIS_PASSWORD:}
+  database: 0
+  timeout: 2000
+  
+# File Storage Configuration
+storage:
+  provider: local # local, s3, azure, gcp
+  local:
+    path: ${STORAGE_PATH:./uploads}
+    max-file-size: 10MB
+  s3:
+    bucket: ${S3_BUCKET:}
+    region: ${S3_REGION:}
+    access-key: ${S3_ACCESS_KEY:}
+    secret-key: ${S3_SECRET_KEY:}
+
+# Monitoring e Observability
+monitoring:
+  apm:
+    enabled: ${APM_ENABLED:false}
+    service-name: letz-backend
+    environment: ${ENVIRONMENT:development}
+    
+  metrics:
+    export:
+      prometheus: true
+      influxdb: false
+      
+  tracing:
+    enabled: true
+    sampling-rate: 0.1
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always 

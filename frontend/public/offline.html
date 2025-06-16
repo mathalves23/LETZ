@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LETZ - Você está offline</title>
+    <meta name="description" content="Conecte-se à internet para continuar usando o LETZ" />
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#6366F1" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    
+    <!-- Favicon -->
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+                sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        
+        .offline-container {
+            text-align: center;
+            max-width: 500px;
+            padding: 2rem;
+            animation: fadeIn 0.6s ease-out;
+        }
+        
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .offline-icon {
+            width: 120px;
+            height: 120px;
+            margin: 0 auto 2rem;
+            position: relative;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.05);
+            }
+            100% {
+                transform: scale(1);
+            }
+        }
+        
+        .offline-icon::before {
+            content: "📡";
+            font-size: 4rem;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            filter: grayscale(1);
+        }
+        
+        .offline-icon::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            margin-bottom: 2rem;
+            line-height: 1.6;
+        }
+        
+        .features {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin: 2rem 0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .features h3 {
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
+        .feature-list {
+            list-style: none;
+            text-align: left;
+        }
+        
+        .feature-list li {
+            padding: 0.5rem 0;
+            display: flex;
+            align-items: center;
+            font-size: 0.95rem;
+            opacity: 0.8;
+        }
+        
+        .feature-list li::before {
+            content: "✓";
+            color: #4ade80;
+            font-weight: bold;
+            margin-right: 0.5rem;
+            font-size: 1.1rem;
+        }
+        
+        .retry-button {
+            background: linear-gradient(45deg, #4ade80, #22c55e);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(74, 222, 128, 0.3);
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 1rem;
+        }
+        
+        .retry-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(74, 222, 128, 0.4);
+        }
+        
+        .retry-button:active {
+            transform: translateY(0);
+        }
+        
+        .connection-status {
+            margin-top: 2rem;
+            padding: 1rem;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+        
+        .connection-status.offline {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+        }
+        
+        .connection-status.online {
+            background: rgba(34, 197, 94, 0.2);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: #86efac;
+        }
+        
+        .tips {
+            margin-top: 2rem;
+            opacity: 0.7;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        
+        .tips strong {
+            color: #fbbf24;
+        }
+        
+        @media (max-width: 640px) {
+            .offline-container {
+                padding: 1rem;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .subtitle {
+                font-size: 1rem;
+            }
+            
+            .offline-icon {
+                width: 100px;
+                height: 100px;
+            }
+            
+            .offline-icon::before {
+                font-size: 3rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="offline-container">
+        <div class="offline-icon"></div>
+        
+        <h1>Você está offline</h1>
+        <p class="subtitle">
+            Não se preocupe! Algumas funcionalidades ainda estão disponíveis enquanto você não tem internet.
+        </p>
+        
+        <div class="features">
+            <h3>🚀 Funcionalidades offline disponíveis:</h3>
+            <ul class="feature-list">
+                <li>Visualizar eventos já carregados</li>
+                <li>Ver seu perfil e estatísticas</li>
+                <li>Navegar pelo conteúdo em cache</li>
+                <li>Receber notificações push</li>
+                <li>Preparar mensagens para envio posterior</li>
+            </ul>
+        </div>
+        
+        <div class="connection-status offline" id="connectionStatus">
+            🔴 Sem conexão com a internet
+        </div>
+        
+        <button class="retry-button" onclick="checkConnection()">
+            🔄 Tentar novamente
+        </button>
+        
+        <div class="tips">
+            <strong>💡 Dica:</strong> Quando voltar online, todas as suas ações serão sincronizadas automaticamente!
+        </div>
+    </div>
+
+    <script>
+        // Monitor de conexão
+        function updateConnectionStatus() {
+            const statusEl = document.getElementById('connectionStatus');
+            
+            if (navigator.onLine) {
+                statusEl.textContent = '🟢 Conectado à internet';
+                statusEl.className = 'connection-status online';
+                
+                // Redirecionar para a aplicação principal após 2 segundos
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 2000);
+            } else {
+                statusEl.textContent = '🔴 Sem conexão com a internet';
+                statusEl.className = 'connection-status offline';
+            }
+        }
+        
+        // Verificar conexão manualmente
+        function checkConnection() {
+            updateConnectionStatus();
+            
+            if (!navigator.onLine) {
+                // Tentar fazer uma requisição de teste
+                fetch('/', { 
+                    mode: 'no-cors',
+                    cache: 'no-cache'
+                })
+                .then(() => {
+                    window.location.href = '/';
+                })
+                .catch(() => {
+                    console.log('Ainda offline');
+                });
+            }
+        }
+        
+        // Listeners para mudanças de conexão
+        window.addEventListener('online', updateConnectionStatus);
+        window.addEventListener('offline', updateConnectionStatus);
+        
+        // Verificação inicial
+        updateConnectionStatus();
+        
+        // Auto-verificação a cada 30 segundos
+        setInterval(checkConnection, 30000);
+        
+        // Service Worker messages
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('message', event => {
+                if (event.data.type === 'CACHE_UPDATED') {
+                    console.log('Cache atualizado');
+                }
+            });
+        }
+        
+        // Animação de entrada
+        document.addEventListener('DOMContentLoaded', () => {
+            document.body.style.opacity = '0';
+            setTimeout(() => {
+                document.body.style.transition = 'opacity 0.5s ease';
+                document.body.style.opacity = '1';
+            }, 100);
+        });
+    </script>
+</body>
+</html> 
